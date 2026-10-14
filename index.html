@@ -213,7 +213,7 @@ const FORMATS = {
 
 const $ = id => document.getElementById(id);
 const state = {
-  scriptUrl: DEFAULT_SCRIPT_URL, sourceName: "https://script.google.com/a/macros/evanssneakers.com/s/AKfycbzjuh0phYXqf4_PV1VXfMkcdCr7G33ZbTZL70bdsbJyyn8hcAoYs2z1v5jeig-UAHBoOg/exec", tabs: [], // [{name, items:[...]}]
+  scriptUrl: DEFAULT_SCRIPT_URL, sourceName: "", tabs: [], // [{name, items:[...]}]
   tab: "", q: "", selected: new Map() // key -> item
 };
 
@@ -284,14 +284,27 @@ function setData(tabs, sourceLabel){
 }
 
 /* ---------- live data from the Google Apps Script web app ---------- */
+// Loaded with a script tag (JSONP) so it works with company-only deployments:
+// the browser sends the viewer's Google sign-in along with the request.
+function jsonp(url){
+  return new Promise((resolve, reject) => {
+    const cb = "__labelFeed" + Date.now();
+    const el = document.createElement("script");
+    const done = () => { clearTimeout(timer); delete window[cb]; el.remove(); };
+    const timer = setTimeout(() => { done(); reject(new Error("no response")); }, 25000);
+    window[cb] = data => { done(); resolve(data); };
+    el.onerror = () => { done(); reject(new Error("blocked or signed out")); };
+    el.src = url + (url.includes("?") ? "&" : "?") + "callback=" + cb + "&t=" + Date.now();
+    document.head.appendChild(el);
+  });
+}
+
 async function loadFromScript(){
   if(!state.scriptUrl){ return; }
   $("srcStatus").textContent = "Loading from Google Sheets…";
   $("reloadBtn").hidden = true;
   try{
-    const res = await fetch(state.scriptUrl + (state.scriptUrl.includes("?")?"&":"?") + "t=" + Date.now());
-    if(!res.ok) throw new Error("HTTP " + res.status);
-    const data = await res.json();
+    const data = await jsonp(state.scriptUrl);
     if(data.error) throw new Error(data.error);
     const tabs = (data.tabs||[]).map(t => ({name:t.name, items:t.items.map((it,i) => ({
       key: t.name+"|"+i, tab: t.name, serial: clean(it.serial), sku: clean(it.sku), title: clean(it.title),
@@ -299,7 +312,7 @@ async function loadFromScript(){
     const when = new Date().toLocaleTimeString([], {hour:"numeric",minute:"2-digit"});
     setData(tabs, tabs.length ? `${data.title || "Google Sheet"}, loaded ${when}` : "The sheet has no tabs with a Serial Code column.");
   }catch(err){
-    const msg = "Couldn't reach your sheet (" + (err.message||err) + "). Check the Apps Script URL with Connect sheet, or open an exported .xlsx file.";
+    const msg = "Couldn't reach your sheet. Make sure this browser is signed in to your @evanssneakers.com Google account, then choose Refresh from sheet. (" + (err.message||err) + ")";
     $("srcStatus").textContent = msg;
     if(!state.tabs.length) $("listwrap").innerHTML = `<div class="empty"><strong>No products loaded</strong>${esc(msg)}</div>`;
   }finally{
